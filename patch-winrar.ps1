@@ -1,17 +1,5 @@
-param(
-    [string]$InstallPath
-)
-
-Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# Configuration
-$AppTitle   = 'WinRAR Key Installer'
-$AppTagline = 'RETRO KEYGEN EDITION'
-$DefaultDir = Join-Path $env:ProgramFiles 'WinRAR'
-$KeyName    = 'rarreg.key'
-
-# Embedded key contents
 $KeyLines = @(
     'RAR registration data'
     'WinRAR'
@@ -26,210 +14,412 @@ $KeyLines = @(
     'aef69d48c864bcd72d15163897773d314187f6a9af350808719796'
 )
 
-if (-not $InstallPath) {
-    $InstallPath = $DefaultDir
+$KeyName = 'rarreg.key'
+
+# Windows 9x Classic Colors
+$Colors = @{
+    BgDark       = [System.Drawing.Color]::Black
+    BgPanel      = [System.Drawing.Color]::FromArgb(192, 192, 192)
+    BgLight      = [System.Drawing.Color]::FromArgb(224, 224, 224)
+    BgDarkGray   = [System.Drawing.Color]::FromArgb(128, 128, 128)
+    TextWhite    = [System.Drawing.Color]::White
+    TextBlack    = [System.Drawing.Color]::Black
+    Highlight    = [System.Drawing.Color]::FromArgb(0, 0, 128)
+    BtnFace      = [System.Drawing.Color]::FromArgb(192, 192, 192)
+    BtnHighlight = [System.Drawing.Color]::White
+    BtnShadow    = [System.Drawing.Color]::FromArgb(128, 128, 128)
+    BtnDark      = [System.Drawing.Color]::FromArgb(64, 64, 64)
+    NeonCyan     = [System.Drawing.Color]::FromArgb(0, 255, 255)
+    NeonGreen    = [System.Drawing.Color]::FromArgb(0, 255, 128)
+    NeonPink     = [System.Drawing.Color]::FromArgb(255, 0, 255)
+    NeonYellow   = [System.Drawing.Color]::FromArgb(255, 255, 0)
 }
 
-# Load WinForms
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-
-$ColorBack   = [System.Drawing.Color]::FromArgb(12, 12, 12)
-$ColorFore   = [System.Drawing.Color]::FromArgb(0, 220, 80)
-$ColorDim    = [System.Drawing.Color]::FromArgb(0, 150, 70)
-$ColorAccent = [System.Drawing.Color]::FromArgb(80, 255, 160)
-$ColorError  = [System.Drawing.Color]::FromArgb(255, 80, 80)
-$ColorInput  = [System.Drawing.Color]::FromArgb(20, 20, 20)
-
-$FontTitle = New-Object System.Drawing.Font('Lucida Console', 12, [System.Drawing.FontStyle]::Bold)
-$FontMono  = New-Object System.Drawing.Font('Consolas', 9, [System.Drawing.FontStyle]::Regular)
-$FontSmall = New-Object System.Drawing.Font('Consolas', 8, [System.Drawing.FontStyle]::Regular)
-
-$script:LogBox = $null
-
-function Show-Dialog {
-    param(
-        [string]$Text,
-        [string]$Title,
-        [System.Windows.Forms.MessageBoxButtons]$Buttons = [System.Windows.Forms.MessageBoxButtons]::OK,
-        [System.Windows.Forms.MessageBoxIcon]$Icon = [System.Windows.Forms.MessageBoxIcon]::Information
+function Find-WinRAR {
+    $Candidates = @(
+        'C:\Program Files\WinRAR'
+        'C:\Program Files (x86)\WinRAR'
+        (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | 
+            Where-Object { $_.DisplayName -like '*WinRAR*' } | Select-Object -ExpandProperty InstallLocation -First 1)
+        (Get-ItemProperty -Path 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | 
+            Where-Object { $_.DisplayName -like '*WinRAR*' } | Select-Object -ExpandProperty InstallLocation -First 1)
     )
-    return [System.Windows.Forms.MessageBox]::Show($Text, $Title, $Buttons, $Icon)
+    foreach ($Path in $Candidates) {
+        if ($Path -and (Test-Path (Join-Path $Path 'WinRAR.exe'))) {
+            return $Path
+        }
+    }
+    return $Candidates[0]
 }
 
-function Require-Admin {
+function Test-Admin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
     $pr = New-Object Security.Principal.WindowsPrincipal($id)
-    if (-not $pr.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) {
-        Show-Dialog -Text 'Run this patcher as Administrator.' -Title $AppTitle -Icon Warning | Out-Null
-        exit 1
-    }
+    return $pr.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
 }
 
 function Write-KeyFile {
     param([string]$Dir)
     $dest = Join-Path $Dir $KeyName
-    if (-not (Test-Path -Path $Dir -PathType Container)) {
+    if (-not (Test-Path $Dir)) {
         New-Item -Path $Dir -ItemType Directory -Force | Out-Null
     }
     Set-Content -Path $dest -Value $KeyLines -Encoding ASCII -Force
 }
 
-function Write-Log {
-    param([string]$Text)
-    if (-not $script:LogBox) { return }
-    $stamp = (Get-Date).ToString('HH:mm:ss')
-    $script:LogBox.AppendText("[$stamp] $Text`r`n")
+# Win9x 3D Border Effect function
+function Add-Win9xBorder($Control, $Inset = $false) {
+    $Control.BorderStyle = 'None'
+    # Outer bevel will be drawn by the panel itself
 }
 
-function Set-ButtonStyle {
-    param([System.Windows.Forms.Button]$Button)
-    $Button.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-    $Button.BackColor = $ColorBack
-    $Button.ForeColor = $ColorFore
-    $Button.FlatAppearance.BorderColor = $ColorDim
-    $Button.FlatAppearance.BorderSize = 1
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+if (-not (Test-Admin)) {
+    [System.Windows.Forms.MessageBox]::Show(
+        "This keygen requires Administrator privileges.`n`nPlease run again as Administrator.",
+        "WinRAR Keygen",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Warning
+    ) | Out-Null
+    exit 1
 }
 
-Require-Admin
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
-# Form
+# Main Form - Win9x Style
 $form = New-Object System.Windows.Forms.Form
-$form.Text = $AppTitle
-$form.Size = New-Object System.Drawing.Size(560, 320)
+$form.Text = "WinRAR Keygen v3.0"
+$form.Size = New-Object System.Drawing.Size(560, 560)
 $form.StartPosition = 'CenterScreen'
-$form.FormBorderStyle = 'FixedSingle'
-$form.ShowIcon = $false
+$form.FormBorderStyle = 'FixedDialog'
 $form.MaximizeBox = $false
 $form.MinimizeBox = $false
-$form.BackColor = $ColorBack
-$form.ForeColor = $ColorFore
-$form.Font = $FontMono
+$form.BackColor = $Colors.BgPanel
+$form.Font = New-Object System.Drawing.Font('MS Sans Serif', 8)
 
-$title = New-Object System.Windows.Forms.Label
-$title.Text = 'WINRAR KEYGEN'
-$title.AutoSize = $true
-$title.Location = New-Object System.Drawing.Point(12, 8)
-$title.Font = $FontTitle
-$title.ForeColor = $ColorAccent
-$form.Controls.Add($title)
+# Outer 3D border (raised)
+$outerPanel = New-Object System.Windows.Forms.Panel
+$outerPanel.Size = New-Object System.Drawing.Size(556, 556)
+$outerPanel.Location = New-Object System.Drawing.Point(2, 2)
+$outerPanel.BackColor = $Colors.BgPanel
+$outerPanel.BorderStyle = 'Fixed3D'
+$form.Controls.Add($outerPanel)
 
-$tagline = New-Object System.Windows.Forms.Label
-$tagline.Text = $AppTagline
-$tagline.AutoSize = $true
-$tagline.Location = New-Object System.Drawing.Point(14, 32)
-$tagline.Font = $FontSmall
-$tagline.ForeColor = $ColorDim
-$form.Controls.Add($tagline)
+# Starfield/Logo area (black background)
+$logoPanel = New-Object System.Windows.Forms.Panel
+$logoPanel.Size = New-Object System.Drawing.Size(526, 180)
+$logoPanel.Location = New-Object System.Drawing.Point(10, 10)
+$logoPanel.BackColor = $Colors.BgDark
+$outerPanel.Controls.Add($logoPanel)
 
-$separator = New-Object System.Windows.Forms.Label
-$separator.Text = '--------------------------------------------------------------'
-$separator.AutoSize = $true
-$separator.Location = New-Object System.Drawing.Point(12, 50)
-$separator.Font = $FontSmall
-$separator.ForeColor = $ColorDim
-$form.Controls.Add($separator)
+# Logo Text - WinRAR
+$logoLabel = New-Object System.Windows.Forms.Label
+$logoLabel.Text = "WinRAR"
+$logoLabel.Font = New-Object System.Drawing.Font('Impact', 36, [System.Drawing.FontStyle]::Bold)
+$logoLabel.AutoSize = $true
+$logoLabel.Location = New-Object System.Drawing.Point(150, 15)
+$logoLabel.ForeColor = [System.Drawing.Color]::FromArgb(255, 200, 100)
+$logoPanel.Controls.Add($logoLabel)
 
-$label = New-Object System.Windows.Forms.Label
-$label.Text = 'Target folder'
-$label.AutoSize = $true
-$label.Location = New-Object System.Drawing.Point(12, 72)
-$form.Controls.Add($label)
+# By BaTTi CoRp
+$battiLabel = New-Object System.Windows.Forms.Label
+$battiLabel.Text = "By BaTTi CoRp"
+$battiLabel.Font = New-Object System.Drawing.Font('Impact', 16, [System.Drawing.FontStyle]::Italic)
+$battiLabel.AutoSize = $true
+$battiLabel.Location = New-Object System.Drawing.Point(170, 85)
+$battiLabel.ForeColor = [System.Drawing.Color]::FromArgb(255, 100, 200)
+$logoPanel.Controls.Add($battiLabel)
 
-$textbox = New-Object System.Windows.Forms.TextBox
-$textbox.Size = New-Object System.Drawing.Size(400, 20)
-$textbox.Location = New-Object System.Drawing.Point(12, 90)
-$textbox.Text = $InstallPath
-$textbox.BackColor = $ColorInput
-$textbox.ForeColor = $ColorAccent
-$textbox.BorderStyle = 'FixedSingle'
-$form.Controls.Add($textbox)
+# KEYGEN label
+$keygenLabel = New-Object System.Windows.Forms.Label
+$keygenLabel.Text = "KEYGEN"
+$keygenLabel.Font = New-Object System.Drawing.Font('Impact', 12, [System.Drawing.FontStyle]::Bold)
+$keygenLabel.AutoSize = $true
+$keygenLabel.Location = New-Object System.Drawing.Point(350, 88)
+$keygenLabel.ForeColor = $Colors.NeonGreen
+$logoPanel.Controls.Add($keygenLabel)
 
-$browse = New-Object System.Windows.Forms.Button
-$browse.Text = 'Browse'
-$browse.Size = New-Object System.Drawing.Size(100, 24)
-$browse.Location = New-Object System.Drawing.Point(424, 88)
-Set-ButtonStyle -Button $browse
-$form.Controls.Add($browse)
+# Version label
+$verLabel = New-Object System.Windows.Forms.Label
+$verLabel.Text = "v3.0"
+$verLabel.Font = New-Object System.Drawing.Font('MS Sans Serif', 7)
+$verLabel.ForeColor = $Colors.NeonCyan
+$verLabel.AutoSize = $true
+$verLabel.Location = New-Object System.Drawing.Point(445, 150)
+$logoPanel.Controls.Add($verLabel)
 
-$patchBtn = New-Object System.Windows.Forms.Button
-$patchBtn.Text = 'INSTALL KEY'
-$patchBtn.Size = New-Object System.Drawing.Size(120, 34)
-$patchBtn.Location = New-Object System.Drawing.Point(155, 124)
-Set-ButtonStyle -Button $patchBtn
-$form.Controls.Add($patchBtn)
+# Color animation timer for logo
+$colorTimer = New-Object System.Windows.Forms.Timer
+$colorTimer.Interval = 200
+$script:colorIndex = 0
+$neonColors = @(
+    [System.Drawing.Color]::FromArgb(255, 200, 100),
+    [System.Drawing.Color]::FromArgb(255, 255, 0),
+    [System.Drawing.Color]::FromArgb(0, 255, 255),
+    [System.Drawing.Color]::FromArgb(255, 0, 255),
+    [System.Drawing.Color]::FromArgb(0, 255, 128)
+)
+$colorTimer.Add_Tick({
+    $script:colorIndex = ($script:colorIndex + 1) % $neonColors.Length
+    $logoLabel.ForeColor = $neonColors[$script:colorIndex]
+})
+$colorTimer.Start()
 
-$closeBtn = New-Object System.Windows.Forms.Button
-$closeBtn.Text = 'EXIT'
-$closeBtn.Size = New-Object System.Drawing.Size(120, 34)
-$closeBtn.Location = New-Object System.Drawing.Point(285, 124)
-Set-ButtonStyle -Button $closeBtn
-$form.Controls.Add($closeBtn)
+# Main content area with 3D sunken border
+$contentPanel = New-Object System.Windows.Forms.Panel
+$contentPanel.Size = New-Object System.Drawing.Size(526, 260)
+$contentPanel.Location = New-Object System.Drawing.Point(10, 198)
+$contentPanel.BackColor = $Colors.BgPanel
+$contentPanel.BorderStyle = 'Fixed3D'
+$outerPanel.Controls.Add($contentPanel)
 
-$logLabel = New-Object System.Windows.Forms.Label
-$logLabel.Text = 'STATUS LOG'
-$logLabel.AutoSize = $true
-$logLabel.Location = New-Object System.Drawing.Point(12, 170)
-$logLabel.Font = $FontSmall
-$logLabel.ForeColor = $ColorDim
-$form.Controls.Add($logLabel)
+# Program label and dropdown
+$yPos = 12
+$progLabel = New-Object System.Windows.Forms.Label
+$progLabel.Text = "Program:"
+$progLabel.Font = New-Object System.Drawing.Font('MS Sans Serif', 8, [System.Drawing.FontStyle]::Bold)
+$progLabel.ForeColor = $Colors.TextBlack
+$progLabel.AutoSize = $true
+$progLabel.Location = New-Object System.Drawing.Point(10, $yPos)
+$contentPanel.Controls.Add($progLabel)
 
-$logBox = New-Object System.Windows.Forms.TextBox
-$logBox.Multiline = $true
-$logBox.ReadOnly = $true
-$logBox.ScrollBars = 'Vertical'
-$logBox.Size = New-Object System.Drawing.Size(512, 90)
-$logBox.Location = New-Object System.Drawing.Point(12, 188)
-$logBox.BackColor = $ColorInput
-$logBox.ForeColor = $ColorFore
-$logBox.BorderStyle = 'FixedSingle'
-$form.Controls.Add($logBox)
-$script:LogBox = $logBox
+# Program text box (read-only, looks like dropdown)
+$progBox = New-Object System.Windows.Forms.TextBox
+$progBox.Size = New-Object System.Drawing.Size(390, 20)
+$progBox.Location = New-Object System.Drawing.Point(10, ($yPos + 18))
+$progBox.Text = "WinRAR Unlimited License Edition"
+$progBox.ReadOnly = $true
+$progBox.BackColor = $Colors.TextWhite
+$progBox.ForeColor = $Colors.TextBlack
+$progBox.BorderStyle = 'Fixed3D'
+$progBox.Font = New-Object System.Drawing.Font('MS Sans Serif', 8)
+$contentPanel.Controls.Add($progBox)
 
+# Dropdown button (decorative)
+$dropBtn = New-Object System.Windows.Forms.Button
+$dropBtn.Size = New-Object System.Drawing.Size(18, 20)
+$dropBtn.Location = New-Object System.Drawing.Point(400, ($yPos + 18))
+$dropBtn.Text = "6"  # Down arrow character
+$dropBtn.Font = New-Object System.Drawing.Font('Marlett', 8)
+$dropBtn.FlatStyle = 'Flat'
+$dropBtn.BackColor = $Colors.BtnFace
+$dropBtn.Enabled = $false
+$contentPanel.Controls.Add($dropBtn)
+
+# Installation Path
+$yPos = 55
+$pathLabel = New-Object System.Windows.Forms.Label
+$pathLabel.Text = "Installation Path:"
+$pathLabel.Font = New-Object System.Drawing.Font('MS Sans Serif', 8, [System.Drawing.FontStyle]::Bold)
+$pathLabel.ForeColor = $Colors.TextBlack
+$pathLabel.AutoSize = $true
+$pathLabel.Location = New-Object System.Drawing.Point(10, $yPos)
+$contentPanel.Controls.Add($pathLabel)
+
+$pathBox = New-Object System.Windows.Forms.TextBox
+$pathBox.Size = New-Object System.Drawing.Size(380, 20)
+$pathBox.Location = New-Object System.Drawing.Point(10, ($yPos + 18))
+$pathBox.Text = (Find-WinRAR)
+$pathBox.BackColor = $Colors.TextWhite
+$pathBox.ForeColor = $Colors.TextBlack
+$pathBox.BorderStyle = 'Fixed3D'
+$pathBox.Font = New-Object System.Drawing.Font('MS Sans Serif', 8)
+$contentPanel.Controls.Add($pathBox)
+
+# Browse button (Win9x style)
+$browseBtn = New-Object System.Windows.Forms.Button
+$browseBtn.Text = "Browse..."
+$browseBtn.Size = New-Object System.Drawing.Size(75, 22)
+$browseBtn.Location = New-Object System.Drawing.Point(440, ($yPos + 17))
+$browseBtn.FlatStyle = 'Flat'
+$browseBtn.BackColor = $Colors.BtnFace
+$browseBtn.Font = New-Object System.Drawing.Font('MS Sans Serif', 8)
+$contentPanel.Controls.Add($browseBtn)
+
+# License Key fields
+$yPos = 105
+$keyLabel = New-Object System.Windows.Forms.Label
+$keyLabel.Text = "License Key:"
+$keyLabel.Font = New-Object System.Drawing.Font('MS Sans Serif', 8, [System.Drawing.FontStyle]::Bold)
+$keyLabel.ForeColor = $Colors.TextBlack
+$keyLabel.AutoSize = $true
+$keyLabel.Location = New-Object System.Drawing.Point(10, $yPos)
+$contentPanel.Controls.Add($keyLabel)
+
+# Key display box (sunken, read-only)
+$keyBox = New-Object System.Windows.Forms.TextBox
+$keyBox.Size = New-Object System.Drawing.Size(505, 20)
+$keyBox.Location = New-Object System.Drawing.Point(10, ($yPos + 18))
+$keyBox.Text = "XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
+$keyBox.ReadOnly = $true
+$keyBox.BackColor = $Colors.TextWhite
+$keyBox.ForeColor = $Colors.TextBlack
+$keyBox.BorderStyle = 'Fixed3D'
+$keyBox.Font = New-Object System.Drawing.Font('Courier New', 9)
+$keyBox.TextAlign = 'Center'
+$contentPanel.Controls.Add($keyBox)
+
+# Status label
+$yPos = 155
+$statusLabel = New-Object System.Windows.Forms.Label
+$statusLabel.Text = "Status:"
+$statusLabel.Font = New-Object System.Drawing.Font('MS Sans Serif', 8, [System.Drawing.FontStyle]::Bold)
+$statusLabel.ForeColor = $Colors.TextBlack
+$statusLabel.AutoSize = $true
+$statusLabel.Location = New-Object System.Drawing.Point(10, $yPos)
+$contentPanel.Controls.Add($statusLabel)
+
+$statusBox = New-Object System.Windows.Forms.TextBox
+$statusBox.Size = New-Object System.Drawing.Size(505, 20)
+$statusBox.Location = New-Object System.Drawing.Point(10, ($yPos + 18))
+$statusBox.Text = "Ready to generate license..."
+$statusBox.ReadOnly = $true
+$statusBox.BackColor = $Colors.TextWhite
+$statusBox.ForeColor = [System.Drawing.Color]::FromArgb(0, 128, 0)
+$statusBox.BorderStyle = 'Fixed3D'
+$statusBox.Font = New-Object System.Drawing.Font('MS Sans Serif', 8)
+$contentPanel.Controls.Add($statusBox)
+
+# Info text
+$infoLabel = New-Object System.Windows.Forms.Label
+$infoLabel.Text = "Click Generate to create your license key. Restart WinRAR after generating."
+$infoLabel.Font = New-Object System.Drawing.Font('MS Sans Serif', 7)
+$infoLabel.ForeColor = $Colors.TextBlack
+$infoLabel.AutoSize = $true
+$infoLabel.Location = New-Object System.Drawing.Point(10, 210)
+$contentPanel.Controls.Add($infoLabel)
+
+# Button panel at bottom
+$buttonPanel = New-Object System.Windows.Forms.Panel
+$buttonPanel.Size = New-Object System.Drawing.Size(526, 40)
+$buttonPanel.Location = New-Object System.Drawing.Point(10, 462)
+$buttonPanel.BackColor = $Colors.BgPanel
+$outerPanel.Controls.Add($buttonPanel)
+
+# 3D Line above buttons
+$line3d = New-Object System.Windows.Forms.Panel
+$line3d.Size = New-Object System.Drawing.Size(526, 2)
+$line3d.Location = New-Object System.Drawing.Point(0, 0)
+$line3d.BackColor = $Colors.BtnShadow
+$buttonPanel.Controls.Add($line3d)
+
+# Generate button
+$genBtn = New-Object System.Windows.Forms.Button
+$genBtn.Text = "&Generate"
+$genBtn.Size = New-Object System.Drawing.Size(90, 25)
+$genBtn.Location = New-Object System.Drawing.Point(100, 10)
+$genBtn.FlatStyle = 'Flat'
+$genBtn.BackColor = $Colors.BtnFace
+$genBtn.Font = New-Object System.Drawing.Font('MS Sans Serif', 8)
+$buttonPanel.Controls.Add($genBtn)
+
+# Discord button
+$discordBtn = New-Object System.Windows.Forms.Button
+$discordBtn.Text = "&Discord"
+$discordBtn.Size = New-Object System.Drawing.Size(90, 25)
+$discordBtn.Location = New-Object System.Drawing.Point(200, 10)
+$discordBtn.FlatStyle = 'Flat'
+$discordBtn.BackColor = [System.Drawing.Color]::FromArgb(88, 101, 242)
+$discordBtn.ForeColor = [System.Drawing.Color]::White
+$discordBtn.Font = New-Object System.Drawing.Font('MS Sans Serif', 8, [System.Drawing.FontStyle]::Bold)
+$buttonPanel.Controls.Add($discordBtn)
+
+# Exit button
+$exitBtn = New-Object System.Windows.Forms.Button
+$exitBtn.Text = "E&xit"
+$exitBtn.Size = New-Object System.Drawing.Size(90, 25)
+$exitBtn.Location = New-Object System.Drawing.Point(300, 10)
+$exitBtn.FlatStyle = 'Flat'
+$exitBtn.BackColor = $Colors.BtnFace
+$exitBtn.Font = New-Object System.Drawing.Font('MS Sans Serif', 8)
+$buttonPanel.Controls.Add($exitBtn)
+
+# Dialog
 $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-$dialog.Description = 'Select the WinRAR installation folder'
-$dialog.SelectedPath = $InstallPath
+$dialog.Description = "Select WinRAR installation folder"
 
-$browse.Add_Click({
-    if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-        $textbox.Text = $dialog.SelectedPath
+$browseBtn.Add_Click({
+    if ($dialog.ShowDialog() -eq 'OK') {
+        $pathBox.Text = $dialog.SelectedPath
     }
 })
 
-$closeBtn.Add_Click({ $form.Close() })
+$exitBtn.Add_Click({ $colorTimer.Stop(); $form.Close() })
 
-$patchBtn.Add_Click({
+$discordBtn.Add_Click({
+    Start-Process "https://discord.gg/bCQqKHGxja"
+})
+
+$genBtn.Add_Click({
     try {
-        $dir = $textbox.Text.Trim().Trim('"')
-        if (-not $dir) { throw 'Folder is empty.' }
-        if (-not (Test-Path -Path $dir -PathType Container)) { throw "Folder not found: $dir" }
-
+        $dir = $pathBox.Text.Trim('"')
+        
+        if (-not $dir) { throw "Please select installation folder" }
+        if (-not (Test-Path $dir)) { throw "Folder not found: $dir" }
+        
         $winrarExe = Join-Path $dir 'WinRAR.exe'
         if (-not (Test-Path $winrarExe)) {
-            $resp = Show-Dialog -Text 'WinRAR.exe not found in that folder. Install key anyway?' -Title 'Confirm' -Buttons YesNo -Icon Question
-            if ($resp -ne [System.Windows.Forms.DialogResult]::Yes) {
-                Write-Log 'Install cancelled by user.'
-                return
-            }
+            $resp = [System.Windows.Forms.MessageBox]::Show(
+                "WinRAR.exe not found.`n`nGenerate anyway?",
+                "Confirm",
+                [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                [System.Windows.Forms.MessageBoxIcon]::Question
+            )
+            if ($resp -ne [System.Windows.Forms.DialogResult]::Yes) { return }
         }
-
-        Write-Log "Installing key to $dir"
+        
+        $statusBox.Text = "Generating license key..."
+        $statusBox.ForeColor = [System.Drawing.Color]::FromArgb(128, 0, 0)
+        $form.Refresh()
+        Start-Sleep -Milliseconds 500
+        
+        # Animate key generation
+        $chars = "ABCDEF0123456789"
+        for ($i = 0; $i -lt 10; $i++) {
+            $randomKey = -join ((1..24) | ForEach-Object { 
+                if ($_ % 5 -eq 0) { "-" } 
+                else { $chars[(Get-Random -Maximum $chars.Length)] }
+            })
+            $keyBox.Text = $randomKey
+            $keyBox.ForeColor = $Colors.NeonYellow
+            $form.Refresh()
+            Start-Sleep -Milliseconds 50
+        }
+        
         Write-KeyFile -Dir $dir
-        Write-Log "Key placed: $(Join-Path $dir $KeyName)"
-
-        Show-Dialog -Text 'Key placed. Restart WinRAR if it was open.' -Title 'Done' -Icon Information | Out-Null
+        
+        $keyBox.Text = "UNLIMITED-CORPORATE-LICENSE-ACTIVATED"
+        $keyBox.ForeColor = [System.Drawing.Color]::FromArgb(0, 128, 0)
+        $statusBox.Text = "License generated successfully!"
+        $statusBox.ForeColor = [System.Drawing.Color]::FromArgb(0, 128, 0)
+        $genBtn.Enabled = $false
+        $genBtn.Text = "Done!"
+        
+        [System.Windows.Forms.MessageBox]::Show(
+            "License key generated successfully!`n`nSaved to: $dir\rarreg.key`n`nRestart WinRAR to activate.",
+            "Success",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        ) | Out-Null
     }
     catch {
-        $msg = $_.Exception.Message
-        Write-Log "ERROR: $msg"
-        Show-Dialog -Text $msg -Title 'Error' -Icon Error | Out-Null
+        $statusBox.Text = "Error: $($_.Exception.Message)"
+        $statusBox.ForeColor = [System.Drawing.Color]::Red
+        $keyBox.Text = "ERROR - GENERATION FAILED"
+        $keyBox.ForeColor = [System.Drawing.Color]::Red
+        
+        [System.Windows.Forms.MessageBox]::Show(
+            $_.Exception.Message,
+            "Error",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
     }
 })
 
-$form.AcceptButton = $patchBtn
-$form.CancelButton = $closeBtn
-$form.Add_Shown({ Write-Log 'Ready. Select WinRAR folder and install key.' })
+
 
 [void]$form.ShowDialog()
 exit 0
